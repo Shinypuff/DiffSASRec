@@ -129,11 +129,12 @@ class SASRecWithDiffusion(SASRec):
         self.mask_token_id = item_num + 1  # Assuming the last token ID is reserved for [MASK]
         
     def log2feats(self, log_seqs):
-        seqs = self.item_emb(torch.LongTensor(log_seqs).to(self.dev))
+        seqs = self.item_emb(torch.tensor(log_seqs, dtype=torch.long, device=self.dev))
         seqs *= self.item_emb.embedding_dim ** 0.5
         poss = torch.tensor(
-            np.tile(np.arange(1, log_seqs.shape[1] + 1), [log_seqs.shape[0], 1])
-        ).to(self.dev)
+            np.tile(np.arange(1, log_seqs.shape[1] + 1), [log_seqs.shape[0], 1]),
+            device=self.dev
+        )
         
         poss *= (log_seqs != 0)
         seqs += self.pos_emb(poss)
@@ -170,7 +171,7 @@ class SASRecWithDiffusion(SASRec):
         return noisy_batch, masked_indices, p_mask
 
     def get_loss(self, log_seqs):
-        log_seqs = torch.LongTensor(log_seqs).to(self.dev)
+        log_seqs = torch.tensor(log_seqs, dtype=torch.long, device=self.dev) if not isinstance(log_seqs, torch.Tensor) else log_seqs
         
         # Apply diffusion process
         noisy_batch, masked_indices, p_mask = self.forward_process(log_seqs)
@@ -187,4 +188,21 @@ class SASRecWithDiffusion(SASRec):
         loss = token_loss.sum() / (log_seqs.shape[0] * log_seqs.shape[1])
         
         return loss
+    
+    def predict_inference(self, log_seqs, num_iterations=5):
+        self.eval()
+        with torch.no_grad():
+            seq_tensor = torch.tensor(log_seqs, dtype=torch.long, device=self.dev)
+            
+            for _ in range(num_iterations):
+                log_feats = self.log2feats(seq_tensor)
+                logits = torch.matmul(log_feats, self.item_emb.weight.t())
+                mask_positions = (seq_tensor == self.mask_token_id)
 
+                if mask_positions.sum() == 0:
+                    break
+                
+                preds = torch.argmax(logits, dim=-1)
+                seq_tensor = torch.where(mask_positions, preds, seq_tensor)
+            
+            return seq_tensor.cpu().numpy()

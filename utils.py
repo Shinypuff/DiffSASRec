@@ -218,3 +218,57 @@ def evaluate_valid(model, dataset, args):
             sys.stdout.flush()
 
     return NDCG / valid_user, HT / valid_user
+
+def evaluate_diffusion(model, dataset, args):
+    [train, valid, test, usernum, itemnum] = copy.deepcopy(dataset)
+    NDCG = 0.0
+    HT = 0.0
+    valid_user = 0.0
+
+    users = range(1, usernum+1) if usernum <= 10000 else np.random.choice(range(1, usernum+1), 10000, replace=False)
+    
+    for u in users:
+        if len(train[u]) < 1 or len(test[u]) < 1 or len(valid[u]) < 1:
+            continue
+
+        seq = np.zeros((args.maxlen,), dtype=np.int32)
+        idx = args.maxlen - 1
+
+        seq[idx] = valid[u][0]
+        idx -= 1
+
+        for item in reversed(train[u]):
+            seq[idx] = item
+            idx -= 1
+            if idx < 0:
+                break
+
+        seq[-1] = model.mask_token_id
+
+        seq_tensor = torch.tensor(np.expand_dims(seq, axis=0), dtype=torch.long, device=model.dev)
+        log_feats = model.log2feats(seq_tensor)
+        logits = torch.matmul(log_feats, model.item_emb.weight.t())  # (batch, seq_len, vocab)
+        masked_logits = logits[:, -1, :]  # (batch, vocab)
+        masked_logits = masked_logits.cpu().detach().numpy()[0]
+        
+        ranked_indices = np.argsort(-masked_logits)
+        top10_indices = ranked_indices[:10]
+        
+        true_token = test[u][0]
+        valid_user += 1
+        
+        if true_token in top10_indices:
+            HT += 1
+            rank = np.where(ranked_indices == true_token)[0][0]
+            NDCG += 1.0 / np.log2(rank + 2)
+
+        # pred_seq = model.predict_inference(np.expand_dims(seq, axis=0), num_iterations=5)
+        # pred_token = pred_seq[0, -1]
+        # true_token = test[u][0]
+        # valid_user += 1
+
+        # if pred_token == true_token:
+        #     HT += 1
+        #     NDCG += 1.0
+        
+    return NDCG / valid_user, HT / valid_user
