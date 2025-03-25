@@ -152,10 +152,13 @@ def evaluate(model, dataset, args):
         rated = set(train[u])
         rated.add(0)
         item_idx = [test[u][0]]
-        for _ in range(100):
-            t = np.random.randint(1, itemnum + 1)
-            while t in rated: t = np.random.randint(1, itemnum + 1)
-            item_idx.append(t)
+        for _ in range(1, itemnum + 1):
+            if _ in rated:
+                continue
+            item_idx.append(_)
+            # t = np.random.randint(1, itemnum + 1)
+            # while t in rated: t = np.random.randint(1, itemnum + 1)
+            # item_idx.append(t)
 
         predictions = -model.predict(*[np.array(l) for l in [[u], [seq], item_idx]])
         predictions = predictions[0] # - for 1st argsort DESC
@@ -261,14 +264,58 @@ def evaluate_diffusion(model, dataset, args):
             HT += 1
             rank = np.where(ranked_indices == true_token)[0][0]
             NDCG += 1.0 / np.log2(rank + 2)
-
-        # pred_seq = model.predict_inference(np.expand_dims(seq, axis=0), num_iterations=5)
-        # pred_token = pred_seq[0, -1]
-        # true_token = test[u][0]
-        # valid_user += 1
-
-        # if pred_token == true_token:
-        #     HT += 1
-        #     NDCG += 1.0
         
     return NDCG / valid_user, HT / valid_user
+
+def evaluate_diffusion_multi(model, dataset, args):
+    import copy
+    [train, valid, test, usernum, itemnum] = copy.deepcopy(dataset)
+    total_ndcg = 0.0
+    total_hr = 0.0
+    valid_user = 0.0
+
+    if usernum > 10000:
+        users = np.random.choice(range(1, usernum+1), 10000, replace=False)
+    else:
+        users = range(1, usernum+1)
+    
+    num_extra = args.num_masks
+
+    from tqdm import tqdm
+    for u in tqdm(users):
+        if len(train[u]) < 1 or len(valid[u]) < 1 or len(test[u]) < 1:
+            continue
+
+        seq = np.zeros((args.maxlen,), dtype=np.int32)
+        idx = args.maxlen - 1
+
+        seq[idx] = valid[u][0]
+        idx -= 1
+
+        for item in reversed(train[u]):
+            seq[idx] = item
+            idx -= 1
+            if idx < 0:
+                break
+
+        seq[-num_extra:] = model.mask_token_id
+
+        pred_seq = model.predict_inference(np.expand_dims(seq, axis=0),
+                                           num_extra=num_extra,
+                                           max_iter=20)
+        pred_seq = pred_seq[0]
+
+        recs = pred_seq[-num_extra:]
+        
+        true_token = test[u][0]
+        valid_user += 1
+        
+        if true_token in recs:
+            total_hr += 1
+            rank = np.where(recs == true_token)[0][0]
+            total_ndcg += 1.0 / np.log2(rank + 2)
+    
+    if valid_user == 0:
+        return 0.0, 0.0
+
+    return total_ndcg / valid_user, total_hr / valid_user

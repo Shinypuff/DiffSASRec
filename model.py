@@ -206,3 +206,37 @@ class SASRecWithDiffusion(SASRec):
                 seq_tensor = torch.where(mask_positions, preds, seq_tensor)
             
             return seq_tensor.cpu().numpy()
+        
+    def predict_inference(self, log_seqs, num_extra=10, max_iter=20):
+        self.eval()
+        with torch.no_grad():
+            seq_tensor = torch.tensor(log_seqs, dtype=torch.long, device=self.dev)
+            total_len = seq_tensor.shape[1]
+            history_len = total_len - num_extra
+            extra_positions = list(range(history_len, total_len))
+            
+            for _ in range(max_iter):
+                log_feats = self.log2feats(seq_tensor)
+                logits = torch.matmul(log_feats, self.item_emb.weight.t())
+                extra_logits = logits[:, extra_positions, :]
+                probs = torch.softmax(extra_logits, dim=-1)
+                
+                mask = (seq_tensor[:, extra_positions] == self.mask_token_id)
+                
+                for i in range(seq_tensor.shape[0]):
+                    masked_indices = torch.nonzero(mask[i]).squeeze(-1)
+                    if masked_indices.numel() == 0:
+                        continue
+                    
+                    masked_probs = probs[i, masked_indices, :]
+                    confidences, predictions = torch.max(masked_probs, dim=-1)
+                    
+                    best_idx_in_masked = torch.argmax(confidences).item()
+                    best_mask_position = masked_indices[best_idx_in_masked].item()
+                    
+                    seq_tensor[i, history_len + best_mask_position] = predictions[best_idx_in_masked]
+                
+                if (seq_tensor[:, extra_positions] == self.mask_token_id).sum() == 0:
+                    break
+
+            return seq_tensor.cpu().numpy()
