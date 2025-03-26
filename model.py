@@ -64,31 +64,30 @@ class SASRec(torch.nn.Module):
             # self.neg_sigmoid = torch.nn.Sigmoid()
 
     def log2feats(self, log_seqs):
-        seqs = self.item_emb(torch.LongTensor(log_seqs).to(self.dev))
+        seqs = self.item_emb(log_seqs.to(self.dev))
         seqs *= self.item_emb.embedding_dim ** 0.5
-        poss = np.tile(np.arange(1, log_seqs.shape[1] + 1), [log_seqs.shape[0], 1])
+
+        batch_size, seq_len = log_seqs.shape
+        poss = torch.arange(1, seq_len + 1, device=self.dev).unsqueeze(0).repeat(batch_size, 1)
 
         poss *= (log_seqs != 0)
-        seqs += self.pos_emb(torch.LongTensor(poss).to(self.dev))
+        seqs += self.pos_emb(poss)
         seqs = self.emb_dropout(seqs)
 
-        tl = seqs.shape[1] # time dim len for enforce causality
+        tl = seqs.shape[1]  # sequence length
         attention_mask = ~torch.tril(torch.ones((tl, tl), dtype=torch.bool, device=self.dev))
 
         for i in range(len(self.attention_layers)):
             seqs = torch.transpose(seqs, 0, 1)
             Q = self.attention_layernorms[i](seqs)
             mha_outputs, _ = self.attention_layers[i](
-                Q, seqs, seqs, attn_mask = attention_mask)
-                                            
+                Q, seqs, seqs, attn_mask=attention_mask)
             seqs = Q + mha_outputs
             seqs = torch.transpose(seqs, 0, 1)
-
             seqs = self.forward_layernorms[i](seqs)
             seqs = self.forward_layers[i](seqs)
 
-        log_feats = self.last_layernorm(seqs) # (U, T, C) -> (U, -1, C)
-
+        log_feats = self.last_layernorm(seqs)
         return log_feats
 
     def forward(self, user_ids, log_seqs, pos_seqs, neg_seqs): # for training        
