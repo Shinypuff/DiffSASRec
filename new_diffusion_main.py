@@ -172,19 +172,32 @@ for epoch in range(1, args.num_epochs + 1):
                 all_targets.append(target_batch)
         HR = 0.0
         NDCG = 0.0
+        MRR = 0.0
         total = 0
+        coverage_set = set()
+
         for preds, targets in zip(all_preds, all_targets):
             for i in range(preds.shape[0]):
                 target = targets[i].item()
                 pred_list = preds[i].tolist()
                 total += 1
+
                 if target in pred_list:
-                    HR += 1
                     rank = pred_list.index(target)
+                    HR += 1
                     NDCG += 1.0 / np.log2(rank + 2)
+                    MRR += 1.0 / (rank + 1)
+
+                coverage_set.update(pred_list)
+
         HR /= total
         NDCG /= total
-        print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}".format(epoch, HR, NDCG))
+        MRR /= total
+        COV = len(coverage_set) / model.item_emb.num_embeddings
+
+        print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
+            epoch, HR, NDCG, MRR, COV))
+        
         if NDCG > best_test_ndcg or HR > best_test_hr:
             best_test_ndcg = max(NDCG, best_test_ndcg)
             best_test_hr = max(HR, best_test_hr)
