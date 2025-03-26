@@ -53,10 +53,9 @@ with open(os.path.join(train_dir, "args.txt"), "w") as f:
 
 train_loader, test_loader = get_data_split(args)
 
-# Here we assume that the training tensor has shape (num_users, maxlen)
-# and that we can get user number from that tensor
-num_users = train_loader.dataset.tensors[0].shape[0]
-itemnum = int(torch.max(train_loader.dataset.tensors[0]).item())
+train_seqs, train_targets = train_loader.dataset.tensors
+all_items = torch.cat([train_seqs.flatten(), train_targets])
+itemnum = int(torch.max(all_items).item()) + 1
 
 if args.model_type == "vanilla":
     model = SASRec(num_users, itemnum, args).to(args.device)
