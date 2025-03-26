@@ -3,8 +3,10 @@ import copy
 import torch
 import random
 import numpy as np
+import pandas as pd
 from collections import defaultdict
 from multiprocessing import Process, Queue
+from torch.utils.data import DataLoader, TensorDataset
 
 def build_index(dataset_name):
 
@@ -272,3 +274,83 @@ def evaluate_diffusion(model, dataset, args):
         #     NDCG += 1.0
         
     return NDCG / valid_user, HT / valid_user
+
+
+def split_by_time(data, time_q=0.95, timeid='timestamp'):
+    split_timepoint = data[timeid].quantile(q=time_q, interpolation='nearest')
+    after = data.query(f'{timeid} >= @split_timepoint')
+    before = data.drop(after.index)
+    return before, after
+
+def create_interaction_tensor(df: pd.DataFrame, users_col, items_col, seq_len: int):
+    grouped = df.copy(deep=True).groupby([users_col])[items_col].apply(list)
+    
+    interactions = []
+    for user_movies in grouped:
+
+        user_movies = user_movies[-seq_len:]
+        padded_movies = [0] * (seq_len - len(user_movies)) + user_movies
+        interactions.append(padded_movies)
+    
+    return torch.tensor(interactions, dtype=torch.long)
+
+def get_data_split(args):
+    data = pd.read_csv(args.data_path)
+
+    users_col = args.users_col
+    items_col = args.items_col
+    time_col = args.time_col
+
+    test_size = args.test_size
+    sep_time = args.time_q
+    maxlen = args.maxlen
+    batch_size = args.batch_size
+
+    n_users = data[users_col].nunique()
+    users = data[users_col].unique()
+
+    n_items = data[items_col].nunique()
+    items = np.sort(data[items_col].unique())
+
+    users_map = {old:new for old, new in zip(users, np.arange(0, n_users))}
+    items_map = {old:new for old, new in zip(items, np.arange(1, n_items+1))}
+
+    data[users_col] = data[users_col].apply(lambda x: users_map[x])
+    data[items_col] = data[items_col].apply(lambda x: items_map[x])
+
+    new_users = data[users_col].unique()
+
+    test_users = np.random.choice(new_users, size = int(test_size*n_users), replace=False)
+    test = data[data[users_col].isin(test_users)]
+
+    train = data[~data[users_col].isin(test_users)]
+
+    train_before, train_after = split_by_time(train, time_q=sep_time, timeid=time_col)
+    test_before, test_after = split_by_time(test, time_q=sep_time, timeid=time_col)
+
+    holdout_train = train_after.sort_values(time_col).groupby(users_col, as_index=False).first()
+    holdout_test = test_after.sort_values(time_col).groupby(users_col, as_index=False).first()
+
+    valid_users_train = np.intersect1d(train_before[users_col].unique(), holdout_train[users_col].unique())
+    valid_users_test = np.intersect1d(test_before[users_col].unique(), holdout_test[users_col].unique())
+
+    train_final = train_before[train_before[users_col].isin(valid_users_train)].sort_values([users_col, time_col])
+    holdout_train = holdout_train[holdout_train[users_col].isin(valid_users_train)].sort_values([users_col, time_col])
+
+    test_final = test_before[test_before[users_col].isin(valid_users_test)].sort_values([users_col, time_col])
+    holdout_test = holdout_test[holdout_test[users_col].isin(valid_users_test)].sort_values([users_col, time_col])
+
+    train_tensor = create_interaction_tensor(train_final, users_col, items_col, maxlen)
+    holdout_train_tensor = torch.tensor(holdout_train[items_col].values)
+
+    train_dataset = TensorDataset(train_tensor, holdout_train_tensor)
+
+    test_tensor = create_interaction_tensor(test_final, users_col, items_col, maxlen)
+    holdout_test_tensor = torch.tensor(holdout_test[items_col].values)
+
+    test_dataset = TensorDataset(test_tensor, holdout_test_tensor)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size)
+
+    return train_loader, test_loader
