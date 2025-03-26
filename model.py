@@ -188,51 +188,73 @@ class SASRecWithDiffusion(SASRec):
         loss = token_loss.sum() / (log_seqs.shape[0] * log_seqs.shape[1])
         
         return loss
-    
-    def predict_inference(self, log_seqs, num_iterations=5):
+
+    def predict_inference(self, log_seqs, top_k=10, **kwargs):
         self.eval()
         with torch.no_grad():
             seq_tensor = torch.tensor(log_seqs, dtype=torch.long, device=self.dev)
             
-            for _ in range(num_iterations):
-                log_feats = self.log2feats(seq_tensor)
-                logits = torch.matmul(log_feats, self.item_emb.weight.t())
-                mask_positions = (seq_tensor == self.mask_token_id)
+            # Shift sequence to the left by removing the first token
+            seq_tensor = seq_tensor[:, 1:]
+            
+            # Append a mask token at the end to maintain the original sequence length
+            mask_column = torch.full((seq_tensor.shape[0], 1), self.mask_token_id, dtype=torch.long, device=self.dev)
+            seq_tensor = torch.cat([seq_tensor, mask_column], dim=1)
+            
+            # Get the logits for the masked token position
+            log_feats = self.log2feats(seq_tensor)
+            logits = torch.matmul(log_feats, self.item_emb.weight.t())
+            
+            # Get the top-k predictions for the masked token
+            mask_logits = logits[:, -1, :]
+            top_k_values, top_k_indices = torch.topk(mask_logits, top_k, dim=-1)
+            
+            return top_k_indices.cpu().numpy()
 
-                if mask_positions.sum() == 0:
-                    break
+    # def predict_inference(self, log_seqs, num_iterations=5, **kwargs):
+    #     self.eval()
+    #     with torch.no_grad():
+    #         seq_tensor = torch.tensor(log_seqs, dtype=torch.long, device=self.dev)
+            
+    #         for _ in range(num_iterations):
+    #             log_feats = self.log2feats(seq_tensor)
+    #             logits = torch.matmul(log_feats, self.item_emb.weight.t())
+    #             mask_positions = (seq_tensor == self.mask_token_id)
+
+    #             if mask_positions.sum() == 0:
+    #                 break
                 
-                preds = torch.argmax(logits, dim=-1)
-                seq_tensor = torch.where(mask_positions, preds, seq_tensor)
+    #             preds = torch.argmax(logits, dim=-1)
+    #             seq_tensor = torch.where(mask_positions, preds, seq_tensor)
             
-            return seq_tensor.cpu().numpy()
+    #         return seq_tensor.cpu().numpy()
         
-    def predict_inference(self, log_seqs, num_extra=10, max_iter=20, conf_threshold=0.0):
-        self.eval()
-        with torch.no_grad():
-            seq_tensor = torch.tensor(log_seqs, dtype=torch.long, device=self.dev)
-            total_len = seq_tensor.shape[1]
-            history_len = total_len - num_extra
-            extra_positions = list(range(history_len, total_len))
+    # def predict_inference(self, log_seqs, num_extra=10, max_iter=20, conf_threshold=0.0):
+    #     self.eval()
+    #     with torch.no_grad():
+    #         seq_tensor = torch.tensor(log_seqs, dtype=torch.long, device=self.dev)
+    #         total_len = seq_tensor.shape[1]
+    #         history_len = total_len - num_extra
+    #         extra_positions = list(range(history_len, total_len))
 
-            for iter_idx in range(max_iter):
-                log_feats = self.log2feats(seq_tensor)
-                logits = torch.matmul(log_feats, self.item_emb.weight.t())
-                extra_logits = logits[:, extra_positions, :]
-                probs = torch.softmax(extra_logits, dim=-1)
+    #         for iter_idx in range(max_iter):
+    #             log_feats = self.log2feats(seq_tensor)
+    #             logits = torch.matmul(log_feats, self.item_emb.weight.t())
+    #             extra_logits = logits[:, extra_positions, :]
+    #             probs = torch.softmax(extra_logits, dim=-1)
 
-                mask = (seq_tensor[:, extra_positions] == self.mask_token_id)
-                if mask.sum() == 0:
-                    break
+    #             mask = (seq_tensor[:, extra_positions] == self.mask_token_id)
+    #             if mask.sum() == 0:
+    #                 break
 
-                confidences, predictions = torch.max(probs, dim=-1)
-                update_mask = mask & (confidences >= conf_threshold)
+    #             confidences, predictions = torch.max(probs, dim=-1)
+    #             update_mask = mask & (confidences >= conf_threshold)
 
-                while update_mask.sum() == 0:
-                    conf_threshold = conf_threshold * 0.9
-                    update_mask = mask & (confidences >= conf_threshold)
+    #             while update_mask.sum() == 0:
+    #                 conf_threshold = conf_threshold * 0.9
+    #                 update_mask = mask & (confidences >= conf_threshold)
 
-                new_tokens = torch.where(update_mask, predictions, seq_tensor[:, extra_positions])
-                seq_tensor[:, extra_positions] = new_tokens
+    #             new_tokens = torch.where(update_mask, predictions, seq_tensor[:, extra_positions])
+    #             seq_tensor[:, extra_positions] = new_tokens
 
-            return seq_tensor.cpu().numpy()
+    #         return seq_tensor.cpu().numpy()
