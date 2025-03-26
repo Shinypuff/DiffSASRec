@@ -302,7 +302,8 @@ def evaluate_diffusion_multi(model, dataset, args):
 
         pred_seq = model.predict_inference(np.expand_dims(seq, axis=0),
                                            num_extra=num_extra,
-                                           max_iter=20)
+                                           max_iter=20,
+                                           conf_threshold=0.9)
         pred_seq = pred_seq[0]
 
         recs = pred_seq[-num_extra:]
