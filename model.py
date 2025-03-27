@@ -72,16 +72,13 @@ class SASRec(torch.nn.Module):
 
     def log2feats(self, log_seqs):
         seqs = self.item_emb(log_seqs.to(self.dev))
-        seqs *= self.item_emb.embedding_dim**0.5
+        seqs *= self.item_emb.embedding_dim ** 0.5
 
         batch_size, seq_len = log_seqs.shape
-        poss = (
-            torch.arange(1, seq_len + 1, device=self.dev)
-            .unsqueeze(0)
-            .repeat(batch_size, 1)
-        )
+        poss = torch.arange(1, seq_len + 1, device=self.dev).unsqueeze(0).repeat(batch_size, 1)
 
-        poss *= log_seqs != 0
+        poss *= (log_seqs != 0)
+        
         seqs += self.pos_emb(poss)
         seqs = self.emb_dropout(seqs)
 
