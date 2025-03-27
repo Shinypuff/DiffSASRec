@@ -267,7 +267,16 @@ class SASRecWithDiffusion(SASRec):
                 extra_logits = logits[:, extra_positions, :]
                 probs = torch.softmax(extra_logits, dim=-1)
 
-                visible = seq_tensor[:, : seq_tensor.shape[1] - num_extra]
+                filtered = [st[st != self.mask_token_id] for st in seq_tensor]
+                max_len = max(t.size(0) for t in filtered)
+                padded_filtered = []
+                for t in filtered:
+                    if t.size(0) < max_len:
+                        padding = torch.full((max_len - t.size(0),), t[-1], dtype=t.dtype, device=t.device)
+                        t = torch.cat([t, padding])
+                    padded_filtered.append(t)
+                visible = torch.stack(padded_filtered)
+    
                 batch_size = seq_tensor.size(0)
                 for i in range(batch_size):
                     tokens_in_visible = torch.unique(visible[i])

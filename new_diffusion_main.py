@@ -237,7 +237,7 @@ for epoch in range(1, args.num_epochs + 1):
         MRR /= total
         COV = len(coverage_set) / model.item_emb.num_embeddings
         print(
-            "Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
+            "Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.6f}, COV@10: {:.4f}".format(
                 epoch, HR, NDCG, MRR, COV
             )
         )
