@@ -1,19 +1,23 @@
 import argparse
 import os
 import time
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+
 from model import SASRec, SASRecWithDiffusion
 from utils import get_data_split
 import json 
+
 
 def str2bool(s):
     if s.lower() not in {"false", "true"}:
         raise ValueError("Not a valid boolean string")
     return s.lower() == "true"
 
+  
 parser = argparse.ArgumentParser()
 parser.add_argument("--data_path", required=True)
 parser.add_argument("--train_dir", required=True)
@@ -24,17 +28,22 @@ parser.add_argument(
     choices=["vanilla", "diffusion"],
     help="Choose 'vanilla' for standard SASRec or 'diffusion' for the diffusion-based variant",
 )
-parser.add_argument("--num_masks", default=10, type=int, help="Number of mask tokens for diffusion inference")
+parser.add_argument(
+    "--num_masks",
+    default=10,
+    type=int,
+    help="Number of mask tokens for diffusion inference",
+)
 parser.add_argument("--batch_size", default=128, type=int)
 parser.add_argument("--lr", default=0.001, type=float)
 parser.add_argument("--maxlen", default=200, type=int)
 parser.add_argument("--hidden_units", default=50, type=int)
-parser.add_argument("--num_blocks", default=2, type=int)
-parser.add_argument("--num_epochs", default=1, type=int)
-parser.add_argument("--num_heads", default=1, type=int)
+parser.add_argument("--num_blocks", default=1, type=int)
+parser.add_argument("--num_epochs", default=1000, type=int)
+parser.add_argument("--num_heads", default=2, type=int)
 parser.add_argument("--dropout_rate", default=0.2, type=float)
 parser.add_argument("--l2_emb", default=0.0, type=float)
-parser.add_argument("--device", default="cuda", type=str)
+parser.add_argument("--device", default="cuda:0", type=str)
 parser.add_argument("--inference_only", default=False, type=str2bool)
 parser.add_argument("--state_dict_path", default=None, type=str)
 parser.add_argument("--users_col", default="UserId", type=str)
@@ -42,13 +51,14 @@ parser.add_argument("--items_col", default="ProductId", type=str)
 parser.add_argument("--time_col", default="Timestamp", type=str)
 parser.add_argument("--test_size", default=0.2, type=float)
 parser.add_argument("--time_q", default=0.95, type=float)
+parser.add_argument(
+    "--diffusion_type", default="multi", type=str, choices=["multi", "single"]
+)
 parser.add_argument("--SFT", default=False, type=str2bool, help="Enable supervised fine-tuning after diffusion pretraining")
-
 args = parser.parse_args()
 
-args.device = torch.device("cpu")
-
 train_dir = args.data_path.split('.')[0] + "_" + args.train_dir
+
 if not os.path.isdir(train_dir):
     os.makedirs(train_dir, exist_ok=True)
 
@@ -59,17 +69,14 @@ with open(os.path.join(train_dir, "args.txt"), "w") as f:
 f = open(f"{train_dir}/log.txt", "w")
 f.write("epoch HR NDCG MRR COV\n")
 
-# added this
 train_loader, test_loader = get_data_split(args)
 
 train_seqs, train_targets = train_loader.dataset.tensors
 all_items = torch.cat([train_seqs.flatten(), train_targets])
 itemnum = int(torch.max(all_items).item()) + 1
 
-# added this
-
 num_users = train_seqs.shape[0]
-
+# num_users = train_loader.dataset.tensors[0].shape[0]
 
 if args.model_type == "vanilla":
     model = SASRec(num_users, itemnum, args).to(args.device)
@@ -87,10 +94,16 @@ model.item_emb.weight.data[0, :] = 0
 
 if args.state_dict_path is not None:
     try:
-        model.load_state_dict(torch.load(args.state_dict_path, map_location=torch.device(args.device)))
+        model.load_state_dict(
+            torch.load(args.state_dict_path, map_location=torch.device(args.device))
+        )
     except Exception as e:
-        print("Failed loading state_dict. Please check file path:", args.state_dict_path)
-        import pdb; pdb.set_trace()
+        print(
+            "Failed loading state_dict. Please check file path:", args.state_dict_path
+        )
+        import pdb
+
+        pdb.set_trace()
 
 if args.inference_only:
     model.eval()
@@ -107,10 +120,15 @@ if args.inference_only:
                 logits = torch.matmul(final_feat, model.item_emb.weight.t())
                 preds = torch.topk(logits, k=10, dim=-1).indices
             else:
-                preds = model.predict_inference(seq_batch.cpu().numpy(),
-                                                num_extra=args.num_masks,
-                                                max_iter=20,
-                                                conf_threshold=0.9)
+                if args.diffusion_type == "multi":
+                    preds = model.predict_inference_multi(
+                        seq_batch.cpu().numpy(),
+                        num_extra=args.num_masks,
+                        max_iter=20,
+                        conf_threshold=0.9,
+                    )
+                else:
+                    preds = model.predict_inference(seq_batch.cpu().numpy(), top_k=10)
                 preds = torch.tensor(preds)
             all_preds.append(preds)
             all_targets.append(target_batch)
@@ -140,9 +158,9 @@ if args.inference_only:
     MRR /= total
     COV = len(coverage_set) / model.item_emb.num_embeddings
 
-    print("Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(HR, NDCG, MRR, COV))
+    print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
+        epoch, HR, NDCG, MRR, COV))
     exit(0)
-
 
 if args.model_type == "vanilla":
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.98))
@@ -161,6 +179,7 @@ for epoch in range(1, args.num_epochs + 1):
         seq_batch = seq_batch.to(args.device)
         target_batch = target_batch.to(args.device)
         optimizer.zero_grad()
+
         if args.model_type == "vanilla":
             log_feats = model.log2feats(seq_batch)
             final_feat = log_feats[:, -1, :]
@@ -168,15 +187,17 @@ for epoch in range(1, args.num_epochs + 1):
             loss = F.cross_entropy(logits, target_batch)
         else:
             loss = model.get_loss(seq_batch)
+
         for param in model.item_emb.parameters():
             loss += args.l2_emb * torch.norm(param)
+
         loss.backward()
         optimizer.step()
         epoch_loss += loss.item()
-    
-    print(f"Epoch {epoch} Loss: {epoch_loss / len(train_loader):.4f}")
 
-    if epoch % 1 == 0:
+    print(f"Epoch {epoch} Loss: {epoch_loss/len(train_loader):.4f}")
+
+    if epoch % 5 == 0:
         model.eval()
         all_preds = []
         all_targets = []
@@ -185,16 +206,25 @@ for epoch in range(1, args.num_epochs + 1):
                 seq_batch, target_batch = batch
                 seq_batch = seq_batch.to(args.device)
                 target_batch = target_batch.to(args.device)
+
                 if args.model_type == "vanilla":
                     log_feats = model.log2feats(seq_batch)
                     final_feat = log_feats[:, -1, :]
                     logits = torch.matmul(final_feat, model.item_emb.weight.t())
                     preds = torch.topk(logits, k=10, dim=-1).indices
                 else:
-                    preds = model.predict_inference(seq_batch.cpu().numpy(),
-                                                    num_extra=args.num_masks,
-                                                    max_iter=20,
-                                                    conf_threshold=0.9)
+                    if args.diffusion_type == "multi":
+                        preds = model.predict_inference_multi(
+                            seq_batch.cpu().numpy(),
+                            num_extra=args.num_masks,
+                            max_iter=20,
+                            conf_threshold=0.9,
+                        )
+                    else:
+                        preds = model.predict_inference(
+                            seq_batch.cpu().numpy(), top_k=10
+                        )
+
                     preds = torch.tensor(preds)
                 all_preds.append(preds)
                 all_targets.append(target_batch)
@@ -223,10 +253,33 @@ for epoch in range(1, args.num_epochs + 1):
         NDCG /= total
         MRR /= total
         COV = len(coverage_set) / model.item_emb.num_embeddings
-
-        print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
-            epoch, HR, NDCG, MRR, COV))
+         
+        print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(epoch, HR, NDCG, MRR, COV))
         
+        if NDCG > best_test_ndcg or HR > best_test_hr:
+            best_test_ndcg = max(NDCG, best_test_ndcg)
+            best_test_hr = max(HR, best_test_hr)
+            torch.save(model.state_dict(), os.path.join(train_dir, f"model.pth"))
+
+        f.write(
+            str(epoch)
+            + " "
+            + str(round(HR, 4))
+            + " "
+            + str(round(NDCG, 4))
+            + " "
+            + str(round(MRR, 4))
+            + " "
+            + str(round(COV, 4))
+            + "\n"
+        )
+        f.flush()
+
+        t1 = time.time() - t0
+        T += t1
+        t0 = time.time()
+
+
 if args.SFT:
 
     print('-----Supervised Fine-Tuning-----')

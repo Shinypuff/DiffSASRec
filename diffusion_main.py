@@ -7,7 +7,8 @@ import torch
 
 from model import SASRec, SASRecWithDiffusion
 from utils import (WarpSampler, build_index, data_partition, evaluate,
-                   evaluate_diffusion, evaluate_valid)
+                   evaluate_diffusion, evaluate_diffusion_multi,
+                   evaluate_valid)
 
 
 def str2bool(s):
@@ -25,6 +26,12 @@ parser.add_argument(
     type=str,
     choices=["vanilla", "diffusion"],
     help="Choose 'vanilla' for standard SASRec or 'diffusion' for the diffusion-based variant",
+)
+parser.add_argument(
+    "--num_masks",
+    default=10,
+    type=int,
+    help="Number of mask tokens to use in multi_mask evaluation",
 )
 parser.add_argument("--batch_size", default=128, type=int)
 parser.add_argument("--lr", default=0.001, type=float)
@@ -175,7 +182,7 @@ for epoch in range(epoch_start_idx, args.num_epochs + 1):
             t_test = evaluate(model, dataset, args)
             t_valid = evaluate_valid(model, dataset, args)
             print(
-                f"Epoch:{epoch} Time:{T:.2f}s, Valid (NDCG@10: {t_valid[0]:.4f}, HR@10: {t_valid[1]:.4f}), Test (NDCG@10: {t_test[0]:.4f}, HR@10: {t_test[1]:.4f})"
+                f"Epoch:{epoch} Time:{T:.2f}s, Valid (NDCG@10: {t_valid[0]:.4f}, HR@10: {t_valid[1]:.4f}, MRR@10: {t_valid[2]:.4f}), Test (NDCG@10: {t_test[0]:.4f}, HR@10: {t_test[1]:.4f}, MRR@10: {t_test[2]:.4f})"
             )
 
             if (
@@ -192,7 +199,8 @@ for epoch in range(epoch_start_idx, args.num_epochs + 1):
                 fname = "SASRec.pth"
                 torch.save(model.state_dict(), os.path.join(folder, fname))
         else:
-            t_test = evaluate_diffusion(model, dataset, args)
+            # t_test = evaluate_diffusion(model, dataset, args)
+            t_test = evaluate_diffusion_multi(model, dataset, args)
             print(
                 f"Epoch:{epoch} Time:{T:.2f}s, Diffusion Test (NDCG@10: {t_test[0]:.4f}, HR@10: {t_test[1]:.4f})"
             )
@@ -210,6 +218,8 @@ for epoch in range(epoch_start_idx, args.num_epochs + 1):
             + str(round(t_test[0], 4))
             + " "
             + str(round(t_test[1], 4))
+            + " "
+            + str(round(t_test[2], 4))
             + "\n"
         )
         log_f.flush()
