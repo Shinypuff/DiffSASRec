@@ -189,6 +189,7 @@ class SASRecWithDiffusion(SASRec):
         
         return loss
 
+
     def predict_inference(self, log_seqs, top_k=10, **kwargs):
         self.eval()
         with torch.no_grad():

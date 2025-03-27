@@ -24,22 +24,22 @@ parser.add_argument(
     help="Choose 'vanilla' for standard SASRec or 'diffusion' for the diffusion-based variant",
 )
 parser.add_argument("--num_masks", default=10, type=int, help="Number of mask tokens for diffusion inference")
-parser.add_argument("--batch_size", default=128, type=int)
+parser.add_argument("--batch_size", default=256, type=int)
 parser.add_argument("--lr", default=0.001, type=float)
 parser.add_argument("--maxlen", default=200, type=int)
 parser.add_argument("--hidden_units", default=50, type=int)
-parser.add_argument("--num_blocks", default=2, type=int)
+parser.add_argument("--num_blocks", default=1, type=int)
 parser.add_argument("--num_epochs", default=1000, type=int)
-parser.add_argument("--num_heads", default=1, type=int)
+parser.add_argument("--num_heads", default=2, type=int)
 parser.add_argument("--dropout_rate", default=0.2, type=float)
 parser.add_argument("--l2_emb", default=0.0, type=float)
-parser.add_argument("--device", default="cuda", type=str)
+parser.add_argument("--device", default="cuda:1", type=str)
 parser.add_argument("--inference_only", default=False, type=str2bool)
 parser.add_argument("--state_dict_path", default=None, type=str)
 parser.add_argument("--users_col", default="UserId", type=str)
 parser.add_argument("--items_col", default="ProductId", type=str)
 parser.add_argument("--time_col", default="Timestamp", type=str)
-parser.add_argument("--test_size", default=0.2, type=float)
+parser.add_argument("--test_size", default=0.1, type=float)
 parser.add_argument("--time_q", default=0.95, type=float)
 args = parser.parse_args()
 
@@ -101,21 +101,34 @@ if args.inference_only:
                 preds = torch.tensor(preds)
             all_preds.append(preds)
             all_targets.append(target_batch)
+
     HR = 0.0
     NDCG = 0.0
+    MRR = 0.0
     total = 0
+    coverage_set = set()
+
     for preds, targets in zip(all_preds, all_targets):
         for i in range(preds.shape[0]):
             target = targets[i].item()
             pred_list = preds[i].tolist()
             total += 1
+
             if target in pred_list:
-                HR += 1
                 rank = pred_list.index(target)
+                HR += 1
                 NDCG += 1.0 / np.log2(rank + 2)
+                MRR += 1.0 / (rank + 1)
+
+            coverage_set.update(pred_list)
+
     HR /= total
     NDCG /= total
-    print("Test HR@10: {:.4f}, NDCG@10: {:.4f}".format(HR, NDCG))
+    MRR /= total
+    COV = len(coverage_set) / model.item_emb.num_embeddings
+
+    print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
+        epoch, HR, NDCG, MRR, COV))
     exit(0)
 
 if args.model_type == "vanilla":
@@ -148,7 +161,8 @@ for epoch in range(1, args.num_epochs + 1):
         optimizer.step()
         epoch_loss += loss.item()
     print(f"Epoch {epoch} Loss: {epoch_loss/len(train_loader):.4f}")
-    if epoch % 100 == 0:
+
+    if epoch % 1 == 0:
         model.eval()
         all_preds = []
         all_targets = []
@@ -170,21 +184,34 @@ for epoch in range(1, args.num_epochs + 1):
                     preds = torch.tensor(preds)
                 all_preds.append(preds)
                 all_targets.append(target_batch)
+
         HR = 0.0
         NDCG = 0.0
+        MRR = 0.0
         total = 0
+        coverage_set = set()
+
         for preds, targets in zip(all_preds, all_targets):
             for i in range(preds.shape[0]):
                 target = targets[i].item()
                 pred_list = preds[i].tolist()
                 total += 1
+
                 if target in pred_list:
-                    HR += 1
                     rank = pred_list.index(target)
+                    HR += 1
                     NDCG += 1.0 / np.log2(rank + 2)
+                    MRR += 1.0 / (rank + 1)
+
+                coverage_set.update(pred_list)
+
         HR /= total
         NDCG /= total
-        print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}".format(epoch, HR, NDCG))
+        MRR /= total
+        COV = len(coverage_set) / model.item_emb.num_embeddings
+
+        print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
+            epoch, HR, NDCG, MRR, COV))
         if NDCG > best_test_ndcg or HR > best_test_hr:
             best_test_ndcg = max(NDCG, best_test_ndcg)
             best_test_hr = max(HR, best_test_hr)
