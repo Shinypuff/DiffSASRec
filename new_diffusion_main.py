@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import time
 
@@ -9,7 +10,6 @@ from torch.utils.data import DataLoader
 
 from model import SASRec, SASRecWithDiffusion
 from utils import get_data_split
-import json 
 
 
 def str2bool(s):
@@ -17,7 +17,7 @@ def str2bool(s):
         raise ValueError("Not a valid boolean string")
     return s.lower() == "true"
 
-  
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--data_path", required=True)
 parser.add_argument("--train_dir", required=True)
@@ -40,6 +40,7 @@ parser.add_argument("--maxlen", default=200, type=int)
 parser.add_argument("--hidden_units", default=50, type=int)
 parser.add_argument("--num_blocks", default=1, type=int)
 parser.add_argument("--num_epochs", default=1000, type=int)
+parser.add_argument("--sft_num_epochs", default=10, type=int)
 parser.add_argument("--num_heads", default=2, type=int)
 parser.add_argument("--dropout_rate", default=0.2, type=float)
 parser.add_argument("--l2_emb", default=0.0, type=float)
@@ -54,10 +55,14 @@ parser.add_argument("--time_q", default=0.95, type=float)
 parser.add_argument(
     "--diffusion_type", default="multi", type=str, choices=["multi", "single"]
 )
-parser.add_argument("--SFT", default=False, type=str2bool, help="Enable supervised fine-tuning after diffusion pretraining")
+parser.add_argument(
+    "--SFT",
+    action="store_true",
+    help="Enable supervised fine-tuning after diffusion pretraining",
+)
 args = parser.parse_args()
 
-train_dir = args.data_path.split('.')[0] + "_" + args.train_dir
+train_dir = args.data_path.split(".")[0] + "_" + args.train_dir
 
 if not os.path.isdir(train_dir):
     os.makedirs(train_dir, exist_ok=True)
@@ -76,7 +81,6 @@ all_items = torch.cat([train_seqs.flatten(), train_targets])
 itemnum = int(torch.max(all_items).item()) + 1
 
 num_users = train_seqs.shape[0]
-# num_users = train_loader.dataset.tensors[0].shape[0]
 
 if args.model_type == "vanilla":
     model = SASRec(num_users, itemnum, args).to(args.device)
@@ -158,8 +162,11 @@ if args.inference_only:
     MRR /= total
     COV = len(coverage_set) / model.item_emb.num_embeddings
 
-    print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
-        epoch, HR, NDCG, MRR, COV))
+    print(
+        "Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
+            epoch, HR, NDCG, MRR, COV
+        )
+    )
     exit(0)
 
 if args.model_type == "vanilla":
@@ -253,9 +260,13 @@ for epoch in range(1, args.num_epochs + 1):
         NDCG /= total
         MRR /= total
         COV = len(coverage_set) / model.item_emb.num_embeddings
-         
-        print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(epoch, HR, NDCG, MRR, COV))
-        
+
+        print(
+            "Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
+                epoch, HR, NDCG, MRR, COV
+            )
+        )
+
         if NDCG > best_test_ndcg or HR > best_test_hr:
             best_test_ndcg = max(NDCG, best_test_ndcg)
             best_test_hr = max(HR, best_test_hr)
@@ -281,10 +292,9 @@ for epoch in range(1, args.num_epochs + 1):
 
 
 if args.SFT:
+    print("-----Supervised Fine-Tuning-----")
 
-    print('-----Supervised Fine-Tuning-----')
-    
-    for epoch in range(1, args.num_epochs + 1):
+    for epoch in range(1, args.sft_num_epochs + 1):
         model.train()
         epoch_loss = 0.0
         for batch in train_loader:
@@ -308,7 +318,7 @@ if args.SFT:
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
-        
+
         print(f"Epoch {epoch} Loss: {epoch_loss / len(train_loader):.4f}")
 
         if epoch % 1 == 0:
@@ -326,10 +336,12 @@ if args.SFT:
                         logits = torch.matmul(final_feat, model.item_emb.weight.t())
                         preds = torch.topk(logits, k=10, dim=-1).indices
                     else:
-                        preds = model.predict_inference(seq_batch.cpu().numpy(),
-                                                        num_extra=args.num_masks,
-                                                        max_iter=20,
-                                                        conf_threshold=0.9)
+                        preds = model.predict_inference(
+                            seq_batch.cpu().numpy(),
+                            num_extra=args.num_masks,
+                            max_iter=20,
+                            conf_threshold=0.9,
+                        )
                         preds = torch.tensor(preds)
                     all_preds.append(preds)
                     all_targets.append(target_batch)
@@ -339,7 +351,6 @@ if args.SFT:
             MRR = 0.0
             total = 0
             coverage_set = set()
-
 
             for preds, targets in zip(all_preds, all_targets):
                 for i in range(preds.shape[0]):
@@ -360,10 +371,12 @@ if args.SFT:
             MRR /= total
             COV = len(coverage_set) / model.item_emb.num_embeddings
 
-            print("Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
-                epoch, HR, NDCG, MRR, COV))
-            
-            
+            print(
+                "Epoch {}: Test HR@10: {:.4f}, NDCG@10: {:.4f}, MRR@10: {:.4f}, COV@10: {:.4f}".format(
+                    epoch, HR, NDCG, MRR, COV
+                )
+            )
+
             f.write(
                 str(epoch)
                 + " "
@@ -383,16 +396,20 @@ if args.SFT:
                 "epoch": epoch,
                 "covered_items": sorted(list(coverage_set)),
                 "num_covered": len(coverage_set),
-                "coverage_ratio": round(COV, 4)
+                "coverage_ratio": round(COV, 4),
             }
 
-            with open(os.path.join(train_dir, f"coverage_set_epoch={epoch}.json"), "w") as cov_file:
+            with open(
+                os.path.join(train_dir, f"coverage_set_epoch={epoch}.json"), "w"
+            ) as cov_file:
                 json.dump(coverage_dict, cov_file, indent=2)
 
         if NDCG > best_test_ndcg or HR > best_test_hr:
             best_test_ndcg = max(NDCG, best_test_ndcg)
             best_test_hr = max(HR, best_test_hr)
-            torch.save(model.state_dict(), os.path.join(train_dir, f"model_epoch={epoch}.pth"))
+            torch.save(
+                model.state_dict(), os.path.join(train_dir, f"model_epoch={epoch}.pth")
+            )
 
     t1 = time.time() - t0
     T += t1
