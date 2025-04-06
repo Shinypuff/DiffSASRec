@@ -5,10 +5,10 @@ The following repository is the implementation of a diffusion SASRec model.
 ## Overview
 
 The repository provides two main model variants:
-- Original SASRec implementation
-  ![Uploading image.png…]()
+- Original SASRec based on [pmixer's PyTorch implementation](https://github.com/pmixer/SASRec.pytorch) 
+<img src="https://github.com/user-attachments/assets/7a1fc846-3d15-43a9-9789-09169f778af9" width=500>
 
-- Diffusion-based Language Modeling inspired by LLaDA:
+- Diffusion-based Language Modeling inspired by [LLaDA](https://github.com/ML-GSAI/LLaDA):
   - Additional mask token embedding
   - Forward diffusion process to add noise to sequences
   - Reverse diffusion process for generative recommendation
@@ -90,6 +90,14 @@ However, our objective is to provide K recommendations so that the next relevant
 The multi-step inference procedure is presented in the Algorithm 2:
 
 ![image](https://github.com/user-attachments/assets/203bebd4-3079-4dcf-8488-0fb205b85e66)
+
+## Data split
+
+Repository provides a [time-based split](https://github.com/Shinypuff/DiffSASRec/blob/main/utils.py#L315) to simulate realistic sequential recommendation settings. The time-based splitting strategy involves defining a time cutoff (e.g. the 95th percentile mark) of the dataset.
+
+To determine the holdout item, the first interaction of each user after the time split is considered. However, this item is only chosen if both the user and the item were present in the dataset before the split. If the first item does not meet this requirement—either because it is a new item that did not appear in the training set or because the users had no prior interactions with it, it is skipped, and the next interaction of the user is checked. This process continues until a suitable holdout item is found, ensuring that every user in the evaluation set has prior interactions and that the model has seen the selected item during training. The time-based splitting strategy is presented below:
+
+<img src="https://github.com/user-attachments/assets/46ca1131-3c94-4168-8288-caffb323f3c7" width="600">
 
 ## Evaluation
 
