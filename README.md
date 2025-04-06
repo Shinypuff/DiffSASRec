@@ -53,7 +53,7 @@ The input data should be a CSV file with the following columns (default names ca
 
 ## Training Process
 
-1. **Diffusion Pretraining**:
+**Diffusion Pretraining**:
 Similarly to LLaDA, our implementation defines a model distribution $p_{\theta}(x_0)$ through a *forward process* and a *reverse process*. With $t \in (0,1)$, the forward process generates partially masked sequence $x_t$, with each token from $x_0$ being masked with probability $t$ or remaining unmasked with probability $1 - t$. Thus, the distribution of masked tokens is:
 
 $$
