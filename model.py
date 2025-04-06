@@ -226,4 +226,4 @@ class SASRecWithDiffusion(SASRec):
                 new_tokens = torch.where(update_mask, predictions, seq_tensor[:, extra_positions])
                 seq_tensor[:, extra_positions] = new_tokens
 
-            return seq_tensor.cpu().numpy()
+            return seq_tensor[:, extra_positions].cpu().numpy()
