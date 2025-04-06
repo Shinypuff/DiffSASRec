@@ -79,11 +79,11 @@ The inference is based on the *reverse process*: given a user interaction histor
 
 However, our objective is to provide K recommendations so that the next relevant item is present in our predictions. Thus, there are 2 ways to sample recommendations:
 
-- **Single-step inference**: Predicts the next item directly. Top K logits are considered to compute metrics @K.
+- [**Single-step inference**](https://github.com/Shinypuff/DiffSASRec/blob/main/model.py#L168): Predicts the next item directly. Top K logits are considered to compute metrics @K.
 
 <img src="https://github.com/user-attachments/assets/cf489fd2-74fe-45c7-a414-50774d9ee6ed" width="500" />
     
-- **Multi-step inference (diffusion-like)**: The algorithm progressively replaces K masked tokens in an iterative manner. At each step, it predicts possible values for the masked positions and assigns confidence scores to these predictions. Only the tokens with confidence scores exceeding a predefined threshold are updated in the sequence. If no predictions meet this threshold, the confidence requirement is gradually lowered.
+- [**Multi-step inference (diffusion-like)**](https://github.com/Shinypuff/DiffSASRec/blob/main/model.py#L183): The algorithm progressively replaces K masked tokens in an iterative manner. At each step, it predicts possible values for the masked positions and assigns confidence scores to these predictions. Only the tokens with confidence scores exceeding a predefined threshold are updated in the sequence. If no predictions meet this threshold, the confidence requirement is gradually lowered.
 
 <img src="https://github.com/user-attachments/assets/593f0a6d-6430-483d-b65a-32dd59527ebb" width="600" />
 
