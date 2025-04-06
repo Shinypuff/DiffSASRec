@@ -22,7 +22,7 @@ python new_diffusion_main.py \
     --data_path your_data.csv \
     --train_dir experiment_name \
     --model_type diffusion \
-    --num_masks 10 \
+    --num_recs 10 \
     --batch_size 128 \
     --maxlen 200 \
     --hidden_units 50 \
@@ -37,7 +37,7 @@ Key parameters:
 - `--train_dir`: Directory to save model checkpoints and logs
 - `--model_type`: Choose between 'vanilla' (original SASRec) or 'diffusion'
 - `--diffusion_type`: Choose between 'multi' or 'single' for diffusion and topK inference respectively
-- `--num_masks`: Number of mask tokens for diffusion inference (the @K value)
+- `--num_recs`: Number of recommendations (mask tokens for diffusion inference or K in topK)
 - `--maxlen`: Maximum sequence length
 - `--hidden_units`: Hidden dimension size
 - `--num_blocks`: Number of transformer blocks
