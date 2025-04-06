@@ -4,9 +4,14 @@ The following repository is the implementation of a diffusion SASRec model.
 
 ## Overview
 
-The model builds on two key components:
+The repository provides two main model variants:
 - Original SASRec implementation
-- Diffusion-based Language Modeling inspired by LLaDA
+  ![Uploading image.png…]()
+
+- Diffusion-based Language Modeling inspired by LLaDA:
+  - Additional mask token embedding
+  - Forward diffusion process to add noise to sequences
+  - Reverse diffusion process for generative recommendation
 
 ### Training
 
@@ -42,21 +47,49 @@ Key parameters:
 ### Data Format
 
 The input data should be a CSV file with the following columns (default names can be customized through the argument parameters):
-- UserId
-- ProductId
-- Timestamp
+- UserId (`--users_col`)
+- ProductId (`--items_col`)
+- Timestamp (`--time_col`)
 
 ## Training Process
 
 1. **Diffusion Pretraining**:
-   - Random masking of sequence tokens
-   - Training to predict masked tokens
-   - Adaptive masking rates
+Similarly to LLaDA, our implementation defines a model distribution $p_{\theta}(x_0)$ through a *forward process* and a *reverse process*. With $t \in (0,1)$, the forward process generates partially masked sequence $x_t$, with each token from $x_0$ being masked with probability $t$ or remaining unmasked with probability $1 - t$. Thus, the distribution of masked tokens is:
 
-2. **(Optional) Supervised Fine-tuning**:
-   - Cross-entropy loss on target items
-   - L2 regularization on embeddings
-   - Adam optimizer with custom learning rate
+$$
+q_{t|0}(x_t^i|x_0^i) = 
+    \begin{cases} 
+    1 - t, & x_t^i = x_0^i, \\
+    t, & x_t^i = \text{M (mask token)}.
+    \end{cases}
+$$
+
+The predictor of DiffSASRec is a parametric model $p_{\theta}(\cdot|x_t)$ that takes $x_t$ as input and predicts all masked tokens simultaneously. It is trained using a cross-entropy loss computed only on the masked tokens:
+
+$$
+L(\theta) = -E_{t, x_0, x_t} \left[ \frac{1}{t} \sum_{i=1}^{L} 1[x_t^i = \mathbf{M}] \log p_{\theta}(x_0^i | x_t) \right]
+$$
+
+Thus, the training algorithm is the following:
+![image](https://github.com/user-attachments/assets/2311d083-5e06-42c1-a4a8-0b3495b3347b)
+
+## Inference
+
+The inference is based on the *reverse process*: given a user interaction history $p_0$, we recover the data distribution by iteratively predicting masked tokens as t moves from 1 to 0. 
+
+However, our objective is to provide K recommendations so that the next relevant item is present in our predictions. Thus, there are 2 ways to sample recommendations:
+
+- **Single-step inference**: Predicts the next item directly. Top K logits are considered to compute metrics @K.
+
+<img src="https://github.com/user-attachments/assets/cf489fd2-74fe-45c7-a414-50774d9ee6ed" width="500" />
+    
+- **Multi-step inference (diffusion-like)**: The algorithm progressively replaces K masked tokens in an iterative manner. At each step, it predicts possible values for the masked positions and assigns confidence scores to these predictions. Only the tokens with confidence scores exceeding a predefined threshold are updated in the sequence. If no predictions meet this threshold, the confidence requirement is gradually lowered.
+
+<img src="https://github.com/user-attachments/assets/593f0a6d-6430-483d-b65a-32dd59527ebb" width="600" />
+
+The multi-step inference procedure is presented in the Algorithm 2:
+
+![image](https://github.com/user-attachments/assets/203bebd4-3079-4dcf-8488-0fb205b85e66)
 
 ## Evaluation
 
