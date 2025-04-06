@@ -198,5 +198,38 @@ def main():
             t1 = time.time() - t0
             t0 = time.time()
 
+    if args.SFT:
+
+        print('-----Supervised Fine-Tuning-----')
+        
+        for epoch in range(1, args.num_epochs + 1):
+            model.train()
+            epoch_loss = 0.0
+            for batch in train_loader:
+                seq_batch, target_batch = batch
+                seq_batch = seq_batch.to(args.device)
+                target_batch = target_batch.to(args.device)
+                optimizer.zero_grad()
+
+                seq_batch = seq_batch[:, 1:]
+                mask_column = torch.full(
+                    (seq_batch.shape[0], 1), model.mask_token_id, dtype=torch.long, device=self.dev
+                )
+                seq_batch = torch.cat([seq_batch, mask_column], dim=1)
+                
+                log_feats = model.log2feats(seq_batch)
+                logits = torch.matmul(log_feats, model.item_emb.weight.t())
+                mask_logits = logits[:, -1, :]
+                loss = F.cross_entropy(mask_logits, target_batch)
+    
+                for param in model.item_emb.parameters():
+                    loss += args.l2_emb * torch.norm(param)
+                
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+            
+            print(f"Epoch {epoch} Loss: {epoch_loss / len(train_loader):.4f}")
+
 if __name__ == "__main__":
     main()
