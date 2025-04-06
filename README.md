@@ -18,7 +18,7 @@ The repository provides two main model variants:
 To train the diffusion model, use the following command:
 
 ```bash
-python new_diffusion_main.py \
+python main.py \
     --data_path your_data.csv \
     --train_dir experiment_name \
     --model_type diffusion \
