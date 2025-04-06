@@ -51,12 +51,12 @@ def evaluate(model, test_loader, args):
                 if args.diffusion_type == "multi":
                     preds = model.predict_inference_multi(
                         seq_batch.cpu().numpy(),
-                        num_extra=args.num_masks,
+                        num_extra=args.num_recs,
                         max_iter=20,
                         conf_threshold=0.9
                     )
                 else:
-                    preds = model.predict_inference(seq_batch.cpu().numpy(), top_k=10)
+                    preds = model.predict_inference(seq_batch.cpu().numpy(), top_k=args.num_recs)
                 preds = torch.tensor(preds)
 
             all_preds.append(preds)
@@ -97,7 +97,7 @@ def main():
     parser.add_argument("--data_path", required=True)
     parser.add_argument("--train_dir", required=True)
     parser.add_argument("--model_type", default="vanilla", choices=["vanilla", "diffusion"])
-    parser.add_argument("--num_masks", default=10, type=int)
+    parser.add_argument("--num_recs", default=10, type=int)
     parser.add_argument("--batch_size", default=128, type=int)
     parser.add_argument("--lr", default=0.001, type=float)
     parser.add_argument("--maxlen", default=200, type=int)
